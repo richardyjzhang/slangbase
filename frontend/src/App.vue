@@ -1,11 +1,22 @@
-<script setup lang="ts"></script>
+<script setup lang="ts">
+import {
+  NConfigProvider,
+  NDialogProvider,
+  NLoadingBarProvider,
+  NMessageProvider,
+  dateZhCN,
+  zhCN,
+} from 'naive-ui'
+</script>
 
 <template>
-  <h1>You did it!</h1>
-  <p>
-    Visit <a href="https://vuejs.org/" target="_blank" rel="noopener">vuejs.org</a> to read the
-    documentation
-  </p>
+  <n-config-provider :locale="zhCN" :date-locale="dateZhCN">
+    <n-loading-bar-provider>
+      <n-dialog-provider>
+        <n-message-provider>
+          <RouterView />
+        </n-message-provider>
+      </n-dialog-provider>
+    </n-loading-bar-provider>
+  </n-config-provider>
 </template>
-
-<style scoped></style>
