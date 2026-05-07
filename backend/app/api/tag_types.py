@@ -105,8 +105,9 @@ def update(tid):
 @tag_types_bp.delete("/tag-types/<tid>")
 def delete(tid):
     db = get_db()
-    cur = db.execute("DELETE FROM tag_types WHERE id = ?", (tid,))
-    db.commit()
-    if cur.rowcount == 0:
+    if _row(db, tid) is None:
         return jsonify({"message": "标签类型不存在"}), 404
+    db.execute("DELETE FROM tags WHERE tag_type_id = ?", (tid,))
+    db.execute("DELETE FROM tag_types WHERE id = ?", (tid,))
+    db.commit()
     return "", 204

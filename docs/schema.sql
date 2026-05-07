@@ -13,3 +13,14 @@ CREATE TABLE IF NOT EXISTS tag_types (
     color      TEXT NOT NULL,        --   color : #RRGGBB
     created_at TEXT NOT NULL
 );
+
+-- -----------------------------------------------------------------------------
+-- 标签 (tags)：从属于某一标签类型，同一类型下名称唯一
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tags (
+    id           TEXT PRIMARY KEY,
+    tag_type_id  TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    created_at   TEXT NOT NULL,
+    UNIQUE (tag_type_id, name)
+);

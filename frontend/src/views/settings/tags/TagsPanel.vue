@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref } from 'vue'
+import { computed, h, onMounted, reactive, ref, watch } from 'vue'
 import {
+  NAlert,
   NButton,
-  NColorPicker,
   NDataTable,
   NEmpty,
   NForm,
@@ -11,36 +11,71 @@ import {
   NInput,
   NModal,
   NPopconfirm,
+  NSelect,
   NSpace,
   NSpin,
   useMessage,
   type DataTableColumns,
   type FormInst,
   type FormRules,
+  type SelectOption,
 } from 'naive-ui'
 import { AddOutline, CreateOutline, RefreshOutline, TrashOutline } from '@vicons/ionicons5'
 import ColoredTag from '@/components/ColoredTag.vue'
 import { tagTypesApi, type TagType } from '@/api/tagTypes'
+import { tagsApi, type Tag } from '@/api/tags'
 import { ApiError } from '@/api/http'
 
 const message = useMessage()
 
-const items = ref<TagType[]>([])
+const tagTypes = ref<TagType[]>([])
+const items = ref<Tag[]>([])
 const loading = ref(false)
+const typesLoading = ref(false)
+
+const filterTypeId = ref<string | null>(null)
 
 const modalVisible = ref(false)
 const submitting = ref(false)
-// editingId 区分新建 / 编辑：null = 新建；否则是被编辑那条的 UUID
 const editingId = ref<string | null>(null)
 const formRef = ref<FormInst | null>(null)
-const formValue = reactive<{ name: string; color: string }>({
+const formValue = reactive<{ tag_type_id: string | null; name: string }>({
+  tag_type_id: null,
   name: '',
-  color: '#3b82f6',
 })
 
 const isEdit = computed(() => editingId.value !== null)
 
+const typeOptions = computed(() =>
+  tagTypes.value.map((t) => ({ label: t.name, value: t.id, color: t.color })),
+)
+
+function resolveOptionLabel(option: SelectOption): string {
+  if (typeof option.label === 'string') return option.label
+  return String(option.value ?? '')
+}
+
+function optionHexColor(option: SelectOption): string {
+  const c = (option as SelectOption & { color?: string }).color
+  return typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#64748b'
+}
+
+function renderTypeLabel(option: SelectOption) {
+  return h(ColoredTag, {
+    label: resolveOptionLabel(option),
+    color: optionHexColor(option),
+  })
+}
+
 const rules: FormRules = {
+  tag_type_id: [
+    {
+      required: true,
+      validator: (_r, value: string | null) => value !== null && value !== '',
+      message: '请选择标签类型',
+      trigger: ['change', 'blur'],
+    },
+  ],
   name: [
     { required: true, message: '请输入名称', trigger: ['input', 'blur'] },
     {
@@ -49,22 +84,26 @@ const rules: FormRules = {
       trigger: ['input', 'blur'],
     },
   ],
-  color: [
-    { required: true, message: '请选择颜色', trigger: ['change', 'blur'] },
-    {
-      validator: (_r, value: string) => /^#[0-9a-fA-F]{6}$/.test(value ?? ''),
-      message: '颜色必须是 #RRGGBB 形式',
-      trigger: ['change', 'blur'],
-    },
-  ],
+}
+
+async function fetchTagTypes() {
+  typesLoading.value = true
+  try {
+    tagTypes.value = await tagTypesApi.list()
+  } catch (e) {
+    message.error(e instanceof ApiError ? e.message : '加载标签类型失败')
+  } finally {
+    typesLoading.value = false
+  }
 }
 
 async function fetchList() {
   loading.value = true
   try {
-    items.value = await tagTypesApi.list()
+    const tid = filterTypeId.value
+    items.value = await tagsApi.list(tid ? { tag_type_id: tid } : undefined)
   } catch (e) {
-    message.error(e instanceof ApiError ? e.message : '加载标签类型失败')
+    message.error(e instanceof ApiError ? e.message : '加载标签失败')
   } finally {
     loading.value = false
   }
@@ -72,15 +111,15 @@ async function fetchList() {
 
 function openCreate() {
   editingId.value = null
+  formValue.tag_type_id = filterTypeId.value ?? tagTypes.value[0]?.id ?? null
   formValue.name = ''
-  formValue.color = '#3b82f6'
   modalVisible.value = true
 }
 
-function openEdit(row: TagType) {
+function openEdit(row: Tag) {
   editingId.value = row.id
+  formValue.tag_type_id = row.tag_type_id
   formValue.name = row.name
-  formValue.color = row.color
   modalVisible.value = true
 }
 
@@ -90,14 +129,18 @@ async function handleSubmit() {
   } catch {
     return
   }
+  if (formValue.tag_type_id === null) {
+    message.warning('请选择标签类型')
+    return
+  }
   submitting.value = true
   try {
-    const payload = { name: formValue.name.trim(), color: formValue.color }
+    const payload = { tag_type_id: formValue.tag_type_id, name: formValue.name.trim() }
     if (isEdit.value && editingId.value) {
-      await tagTypesApi.update(editingId.value, payload)
+      await tagsApi.update(editingId.value, payload)
       message.success('已保存')
     } else {
-      await tagTypesApi.create(payload)
+      await tagsApi.create(payload)
       message.success('已创建')
     }
     modalVisible.value = false
@@ -109,9 +152,9 @@ async function handleSubmit() {
   }
 }
 
-async function handleDelete(row: TagType) {
+async function handleDelete(row: Tag) {
   try {
-    await tagTypesApi.remove(row.id)
+    await tagsApi.remove(row.id)
     message.success('已删除')
     await fetchList()
   } catch (e) {
@@ -119,25 +162,20 @@ async function handleDelete(row: TagType) {
   }
 }
 
-const columns = computed<DataTableColumns<TagType>>(() => [
+const columns = computed<DataTableColumns<Tag>>(() => [
   {
     title: '名称',
     key: 'name',
-    width: 240,
-    render: (row) => h(ColoredTag, { label: row.name, color: row.color }),
+    minWidth: 160,
+    render: (row) => h(ColoredTag, { label: row.name, color: row.tag_type_color }),
   },
   {
-    title: '颜色',
-    key: 'color',
+    title: '所属类型',
+    key: 'tag_type_name',
     width: 200,
+    ellipsis: { tooltip: true },
     render: (row) =>
-      h('div', { class: 'flex items-center gap-2' }, [
-        h('span', {
-          class: 'inline-block h-4 w-4 rounded border border-gray-200',
-          style: { background: row.color },
-        }),
-        h('span', { class: 'font-mono text-sm text-gray-600' }, row.color),
-      ]),
+      h('span', { class: 'text-gray-900' }, row.tag_type_name),
   },
   {
     title: '操作',
@@ -173,37 +211,59 @@ const columns = computed<DataTableColumns<TagType>>(() => [
                   default: () => '删除',
                 },
               ),
-            default: () => `确定删除标签类型「${row.name}」吗？`,
+            default: () => `确定删除标签「${row.name}」吗？`,
           },
         ),
       ]),
   },
 ])
 
-onMounted(fetchList)
+const hasTypes = computed(() => tagTypes.value.length > 0)
+
+watch(filterTypeId, () => {
+  void fetchList()
+})
+
+onMounted(async () => {
+  await fetchTagTypes()
+  await fetchList()
+})
 </script>
 
 <template>
   <div class="flex flex-col gap-3">
-    <div class="flex items-center justify-between">
+    <div class="flex flex-wrap items-center justify-between gap-2">
       <span class="text-sm text-gray-500">
-        管理标签的分类，例如「领域」「部门」等。每种类型对应一个展示颜色。
+        每个标签从属于一种类型；同一类型下名称不可重复。
       </span>
       <n-space>
+        <n-select
+          v-model:value="filterTypeId"
+          clearable
+          placeholder="按类型筛选"
+          class="min-w-[200px]"
+          :options="typeOptions"
+          :loading="typesLoading"
+          :render-label="renderTypeLabel"
+        />
         <n-button :loading="loading" @click="fetchList">
           <template #icon>
             <n-icon><RefreshOutline /></n-icon>
           </template>
           刷新
         </n-button>
-        <n-button type="primary" @click="openCreate">
+        <n-button type="primary" :disabled="!hasTypes" @click="openCreate">
           <template #icon>
             <n-icon><AddOutline /></n-icon>
           </template>
-          新建标签类型
+          新建标签
         </n-button>
       </n-space>
     </div>
+
+    <n-alert v-if="!hasTypes && !typesLoading" type="warning" class="text-sm">
+      还没有标签类型，请先在「标签类型」页签中创建。
+    </n-alert>
 
     <n-spin :show="loading">
       <n-data-table
@@ -212,10 +272,10 @@ onMounted(fetchList)
         :bordered="false"
         :single-line="false"
         size="small"
-        :row-key="(row: TagType) => row.id"
+        :row-key="(row: Tag) => row.id"
       >
         <template #empty>
-          <n-empty description="还没有标签类型" />
+          <n-empty :description="hasTypes ? '还没有标签' : '暂无可选类型'" />
         </template>
       </n-data-table>
     </n-spin>
@@ -223,7 +283,7 @@ onMounted(fetchList)
     <n-modal
       v-model:show="modalVisible"
       preset="card"
-      :title="isEdit ? '编辑标签类型' : '新建标签类型'"
+      :title="isEdit ? '编辑标签' : '新建标签'"
       style="width: 420px"
       :mask-closable="false"
     >
@@ -232,22 +292,25 @@ onMounted(fetchList)
         :model="formValue"
         :rules="rules"
         label-placement="left"
-        label-width="60"
+        label-width="72"
         require-mark-placement="right-hanging"
       >
+        <n-form-item label="类型" path="tag_type_id">
+          <n-select
+            v-model:value="formValue.tag_type_id"
+            placeholder="选择标签类型"
+            to="body"
+            :options="typeOptions"
+            :loading="typesLoading"
+            :render-label="renderTypeLabel"
+          />
+        </n-form-item>
         <n-form-item label="名称" path="name">
           <n-input
             v-model:value="formValue.name"
-            placeholder="如 领域 / 部门"
+            placeholder="标签名称"
             maxlength="64"
             show-count
-          />
-        </n-form-item>
-        <n-form-item label="颜色" path="color">
-          <n-color-picker
-            v-model:value="formValue.color"
-            :show-alpha="false"
-            :modes="['hex']"
           />
         </n-form-item>
       </n-form>

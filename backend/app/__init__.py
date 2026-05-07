@@ -44,8 +44,10 @@ def create_app() -> Flask:
             db.close()
 
     from app.api.tag_types import tag_types_bp
+    from app.api.tags import tags_bp
 
     app.register_blueprint(tag_types_bp, url_prefix="/api")
+    app.register_blueprint(tags_bp, url_prefix="/api")
 
     @app.get("/api/health")
     def health():
